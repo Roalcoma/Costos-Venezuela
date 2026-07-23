@@ -1,0 +1,26 @@
+:root {
+  --primary:        #86BB25;
+  --primary-dark:   #6a9a1e;
+  --primary-light:  #eef6d0;
+  --dark:           #202020;
+  --gray:           #555652;
+  --gray-light:     #8a8986;
+  --gray-lighter:   #d4d4d0;
+  --white:          #FFFFFF;
+  --bg-main:        #f3f3f0;
+  --sidebar-bg:     #202020;
+  --sidebar-hover:  #2c2c2c;
+  --text-main:      #202020;
+  --text-secondary: #555652;
+  --border:         #dedede;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  font-family: 'Inter', system-ui, sans-serif;
+  background-color: var(--bg-main);
+  color: var(--text-main);
+  -webkit-font-smoothing: antialiased;
+}
