@@ -326,28 +326,49 @@
     <!-- ──────────────── TAB: SISTEMA ──────────────── -->
     <div v-if="tabActiva === 'sistema'" class="tab-content">
       <div class="section-card">
-        <h3>Actualización del Sistema</h3>
-
-        <div class="version-row">
-          <span class="version-label">Versión actual:</span>
-          <span class="version-badge">{{ versionActual || '...' }}</span>
+        <div class="section-header">
+          <h3>Actualización del Sistema</h3>
+          <span class="version-badge">v{{ versionActual || '...' }}</span>
         </div>
 
-        <div class="update-form">
-          <label class="form-label">URL del ZIP en GitHub</label>
-          <input v-model="githubZipUrl" class="url-input"
-            placeholder="https://github.com/usuario/repo/archive/refs/heads/main.zip" />
-          <button @click="iniciarActualizacion" :disabled="actualizando || !githubZipUrl" class="btn-update">
-            {{ actualizando ? estadoActualizacion : '⬆ Actualizar Sistema' }}
+        <!-- URL de GitHub -->
+        <div class="sys-block">
+          <label class="sys-label">URL del ZIP en GitHub</label>
+          <div class="sys-url-row">
+            <input v-model="githubZipUrl" class="sys-url-input"
+              placeholder="https://github.com/usuario/repo/archive/refs/heads/main.zip" />
+            <button @click="guardarUrl" class="btn-save-url" title="Guardar URL">
+              💾 Guardar URL
+            </button>
+          </div>
+          <span v-if="urlGuardada" class="url-saved-msg">✓ URL guardada</span>
+        </div>
+
+        <!-- Botón principal -->
+        <div class="sys-block">
+          <button
+            @click="iniciarActualizacion"
+            :disabled="actualizando || !githubZipUrl"
+            class="btn-actualizar"
+          >
+            <span v-if="actualizando" class="btn-spinner"></span>
+            {{ actualizando ? estadoActualizacion : '⬆ Actualizar a la versión de GitHub' }}
           </button>
         </div>
 
-        <div v-if="actualizando" class="update-status">
-          <div class="update-spinner"></div>
-          <span>{{ estadoActualizacion }}</span>
+        <!-- Estado -->
+        <div v-if="actualizacionCompletada" class="sys-msg ok">
+          ✅ Sistema actualizado correctamente. Nueva versión: v{{ versionActual }}
         </div>
-        <div v-if="actualizacionCompletada" class="update-ok">✅ Sistema actualizado correctamente.</div>
-        <div v-if="errorActualizacion" class="update-err">❌ {{ errorActualizacion }}</div>
+        <div v-if="errorActualizacion" class="sys-msg err">
+          ❌ {{ errorActualizacion }}
+        </div>
+
+        <!-- Instrucciones -->
+        <div class="sys-help">
+          <strong>Flujo de trabajo:</strong>
+          Haz cambios en el código → <code>git push</code> a GitHub → clic en "Actualizar" → el servidor se reinicia automáticamente (~2–3 min).
+        </div>
       </div>
     </div>
 
@@ -547,31 +568,40 @@ const subirMasiva = async (event: Event) => {
 };
 
 // ── Auto-updater ──────────────────────────────────
-const githubZipUrl          = ref('');
-const actualizando          = ref(false);
+const LS_KEY = 'cv_github_zip_url';
+const githubZipUrl            = ref(localStorage.getItem(LS_KEY) || '');
+const urlGuardada             = ref(false);
+const actualizando            = ref(false);
 const actualizacionCompletada = ref(false);
-const errorActualizacion    = ref('');
-const estadoActualizacion   = ref('');
-const versionActual         = ref('');
+const errorActualizacion      = ref('');
+const estadoActualizacion     = ref('');
+const versionActual           = ref('');
 
 const cargarVersion = async () => {
     try { versionActual.value = (await apiService.getHealth()).data.version; } catch {}
 };
 
+const guardarUrl = () => {
+    localStorage.setItem(LS_KEY, githubZipUrl.value);
+    urlGuardada.value = true;
+    setTimeout(() => { urlGuardada.value = false; }, 2000);
+};
+
 const iniciarActualizacion = async () => {
-    if (!confirm('¿Confirmas la actualización? El servidor se reiniciará automáticamente.')) return;
+    if (!githubZipUrl.value) return alert('Primero ingresa y guarda la URL del ZIP.');
+    if (!confirm('¿Confirmas la actualización? El servidor se reiniciará automáticamente (~2–3 min).')) return;
     actualizando.value = true;
     actualizacionCompletada.value = false;
     errorActualizacion.value = '';
-    estadoActualizacion.value = 'Descargando y aplicando actualización...';
+    estadoActualizacion.value = 'Descargando ZIP...';
     try {
         await apiService.actualizarSistema(githubZipUrl.value);
-        estadoActualizacion.value = 'Servidor reiniciando...';
+        estadoActualizacion.value = 'Aplicando cambios y reiniciando servidor...';
         await new Promise<void>((resolve, reject) => {
             let attempts = 0;
             setTimeout(() => {
                 const poll = setInterval(async () => {
-                    if (++attempts > 120) { clearInterval(poll); reject(new Error('Timeout: el servidor tardó demasiado.')); return; }
+                    if (++attempts > 120) { clearInterval(poll); reject(new Error('Timeout: el servidor tardó más de 6 min.')); return; }
                     try { await apiService.getHealth(); clearInterval(poll); resolve(); } catch {}
                 }, 3000);
             }, 8000);
@@ -580,7 +610,7 @@ const iniciarActualizacion = async () => {
         await cargarVersion();
     } catch (e: any) {
         errorActualizacion.value = e?.response?.data?.error || e.message || 'Error desconocido.';
-    } finally { actualizando.value = false; }
+    } finally { actualizando.value = false; estadoActualizacion.value = ''; }
 };
 
 onMounted(() => { cargarUsuarios(); cargarGastos(); cargarVersion(); });
@@ -907,17 +937,23 @@ h1 { margin: 0; font-size: 22px; font-weight: 800; color: var(--dark); }
 .tasa-select    { padding: 6px 10px; border: 1px solid #ddd; border-radius: 8px; font-size: 13px; width: 100%; }
 .tasa-select-sm { padding: 4px 8px;  border: 1px solid #ddd; border-radius: 6px; font-size: 12px; }
 /* Sistema tab */
-.version-row   { display: flex; align-items: center; gap: 10px; margin-bottom: 20px; }
-.version-label { font-size: 14px; color: var(--gray); }
-.version-badge { background: var(--accent); color: #fff; border-radius: 12px; padding: 2px 12px; font-size: 13px; font-weight: 700; }
-.update-form   { display: flex; flex-direction: column; gap: 10px; max-width: 600px; }
-.form-label    { font-size: 13px; font-weight: 600; color: var(--dark); }
-.url-input     { padding: 9px 12px; border: 1.5px solid var(--border); border-radius: 8px; font-size: 13px; width: 100%; }
-.btn-update    { align-self: flex-start; padding: 9px 22px; background: var(--accent); color: #fff; border: none; border-radius: 8px; font-weight: 700; cursor: pointer; font-size: 14px; }
-.btn-update:disabled { opacity: 0.5; cursor: not-allowed; }
-.update-status { display: flex; align-items: center; gap: 10px; margin-top: 16px; font-size: 14px; color: var(--gray); }
-.update-spinner { width: 18px; height: 18px; border: 3px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.8s linear infinite; }
+.version-badge  { background: var(--accent, #4f46e5); color: #fff; border-radius: 12px; padding: 3px 14px; font-size: 13px; font-weight: 700; }
+.sys-block      { margin-bottom: 20px; }
+.sys-label      { display: block; font-size: 12px; font-weight: 700; color: var(--gray); text-transform: uppercase; letter-spacing: .05em; margin-bottom: 8px; }
+.sys-url-row    { display: flex; gap: 8px; align-items: stretch; }
+.sys-url-input  { flex: 1; padding: 10px 12px; border: 1.5px solid var(--border, #ddd); border-radius: 8px; font-size: 13px; outline: none; }
+.sys-url-input:focus { border-color: var(--accent, #4f46e5); }
+.btn-save-url   { padding: 0 18px; background: #f3f4f6; color: #374151; border: 1.5px solid #d1d5db; border-radius: 8px; font-size: 13px; font-weight: 600; cursor: pointer; white-space: nowrap; }
+.btn-save-url:hover { background: #e5e7eb; }
+.url-saved-msg  { font-size: 12px; color: #16a34a; margin-top: 4px; display: block; }
+.btn-actualizar { display: inline-flex; align-items: center; gap: 8px; padding: 11px 28px; background: var(--accent, #4f46e5); color: #fff; border: none; border-radius: 10px; font-size: 15px; font-weight: 700; cursor: pointer; }
+.btn-actualizar:disabled { opacity: 0.55; cursor: not-allowed; }
+.btn-actualizar:not(:disabled):hover { filter: brightness(1.1); }
+.btn-spinner    { width: 16px; height: 16px; border: 2.5px solid rgba(255,255,255,.35); border-top-color: #fff; border-radius: 50%; animation: spin 0.75s linear infinite; flex-shrink: 0; }
 @keyframes spin { to { transform: rotate(360deg); } }
-.update-ok  { margin-top: 14px; padding: 10px 14px; background: #d4edda; color: #155724; border-radius: 8px; font-size: 14px; }
-.update-err { margin-top: 14px; padding: 10px 14px; background: #f8d7da; color: #721c24; border-radius: 8px; font-size: 14px; }
+.sys-msg        { margin-top: 16px; padding: 12px 16px; border-radius: 8px; font-size: 14px; }
+.sys-msg.ok     { background: #d1fae5; color: #065f46; }
+.sys-msg.err    { background: #fee2e2; color: #991b1b; }
+.sys-help       { margin-top: 24px; padding: 14px 16px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; font-size: 13px; color: #475569; line-height: 1.6; }
+.sys-help code  { background: #e2e8f0; padding: 1px 6px; border-radius: 4px; font-family: monospace; }
 </style>
