@@ -2,7 +2,7 @@ import express, { Request, Response } from 'express';
 import cors from 'cors';
 import sql from 'mssql';
 import * as dotenv from 'dotenv';
-import { poolPromise, generalPoolPromise, getBrandPool, parsearPathBD } from './database';
+import { poolPromise, generalPoolPromise, getBrandPool, parsearPathBD, parsearDbName } from './database';
 import { authenticate, requireAdmin, generarToken, getDbNamesFromReq, encriptar, TokenPayload } from './auth';
 import multer from 'multer';
 import * as XLSX from 'xlsx'
@@ -118,7 +118,8 @@ app.post('/api/auth/login', async (req: Request, res: Response) => {
             .map(e => ({
                 codempresa: e.CODEMPRESA,
                 titulo: e.TITULO,
-                dbName: parsearPathBD(e.PATHBD)
+                dbName: parsearDbName(e.PATHBD),  // solo nombre, para filtros y display
+                pathBD: e.PATHBD                   // path completo ("servidor:BD" o "BD")
             }))
             .filter(e => !excluidas.includes(e.dbName));
 
@@ -406,10 +407,11 @@ async function getDbNamesDeContenedor(contenedorId: number, userDbNames: string[
 
 app.get('/api/comprasgeneral/:contenedor', authenticate, async (req: Request, res: Response) => {
     try {
-        const dbNames = getDbNamesFromReq(req);
-        const resultados = (await Promise.all(dbNames.map(async (dbName) => {
+        const pathBDs = getDbNamesFromReq(req);
+        const resultados = (await Promise.all(pathBDs.map(async (pathBD) => {
             try {
-                const bPool = await getBrandPool(dbName);
+                const bPool = await getBrandPool(pathBD);
+                const dbName = parsearDbName(pathBD);
                 const DBO = `${dbName}.DBO`;
                 const result = await bPool.request()
                     .input('contenedor', sql.NVarChar, req.params.contenedor)
@@ -437,12 +439,13 @@ app.get('/api/comprasgeneral/:contenedor', authenticate, async (req: Request, re
 
 app.get('/api/ventastiendas/:contenedor', authenticate, async (req: Request, res: Response) => {
     try {
-        const dbNames = getDbNamesFromReq(req);
+        const pathBDs = getDbNamesFromReq(req);
 
-        const resultados = (await Promise.all(dbNames.map(async (dbName) => {
+        const resultados = (await Promise.all(pathBDs.map(async (pathBD) => {
             try {
-                await updateContenedorEnMarca(req.params.contenedor as string, dbName);
-                const bPool = await getBrandPool(dbName);
+                await updateContenedorEnMarca(req.params.contenedor as string, pathBD);
+                const bPool = await getBrandPool(pathBD);
+                const dbName = parsearDbName(pathBD);
                 const DBO = `${dbName}.DBO`;
                 const result = await bPool.request()
                     .input('contenedor', sql.NVarChar, req.params.contenedor)
@@ -494,9 +497,9 @@ app.get('/api/ventastiendas/:contenedor', authenticate, async (req: Request, res
         }))).flat();
 
         // Calcular % sobre el total del contenedor (suma TOTALNETO albaranes Z de todas las marcas)
-        const totalContenedor = (await Promise.all(dbNames.map(async (dbName) => {
+        const totalContenedor = (await Promise.all(pathBDs.map(async (pathBD) => {
             try {
-                const bPool = await getBrandPool(dbName);
+                const bPool = await getBrandPool(pathBD);
                 const r = await bPool.request()
                     .input('contenedor', sql.NVarChar, req.params.contenedor)
                     .query(`
@@ -523,10 +526,11 @@ app.get('/api/ventastiendas/:contenedor', authenticate, async (req: Request, res
 
 app.get('/api/comprastiendas/:contenedor', authenticate, async (req: Request, res: Response) => {
     try {
-        const dbNames = getDbNamesFromReq(req);
-        const resultados = (await Promise.all(dbNames.map(async (dbName) => {
+        const pathBDs = getDbNamesFromReq(req);
+        const resultados = (await Promise.all(pathBDs.map(async (pathBD) => {
             try {
-                const bPool = await getBrandPool(dbName);
+                const bPool = await getBrandPool(pathBD);
+                const dbName = parsearDbName(pathBD);
                 const DBO = `${dbName}.DBO`;
                 const result = await bPool.request()
                     .input('contenedor', sql.NVarChar, req.params.contenedor)
@@ -556,9 +560,10 @@ app.get('/api/comprastiendas/:contenedor', authenticate, async (req: Request, re
     } catch (error: any) { res.status(500).json({ error: error.message }); }
 });
 
-const updateContenedorEnMarca = async (contenedor: string, dbName: string): Promise<number> => {
+const updateContenedorEnMarca = async (contenedor: string, pathBD: string): Promise<number> => {
     try {
-        const bPool = await getBrandPool(dbName);
+        const bPool = await getBrandPool(pathBD);
+        const dbName = parsearDbName(pathBD);
         const DBO = `${dbName}.DBO`;
         const result = await bPool.request()
             .input('contenedor', sql.NVarChar, contenedor)
@@ -576,7 +581,7 @@ const updateContenedorEnMarca = async (contenedor: string, dbName: string): Prom
             `);
         return result.rowsAffected[0];
     } catch (error: any) {
-        console.error(`Error updateContenedor en ${dbName}:`, error.message);
+        console.error(`Error updateContenedor en ${pathBD}:`, error.message);
         return 0;
     }
 };
@@ -648,6 +653,22 @@ app.get('/api/maestro-gastos/:marca', authenticate, async (req: Request, res: Re
 // PROCESAR GASTOS EN TIENDAS (multi-marca)
 // ─────────────────────────────────────────────
 
+/** Resuelve nombres de BD planos (sin servidor) a su pathBD completo usando GENERAL.EMPRESAS */
+async function resolverPathBDsDesdeNombres(dbNames: string[]): Promise<Map<string, string>> {
+    const gPool = await generalPoolPromise;
+    const res = await gPool.request().query(`SELECT PATHBD FROM EMPRESAS WHERE ISNULL(PATHBD,'') <> ''`);
+    const map = new Map<string, string>();
+    for (const row of res.recordset) {
+        const nombre = parsearDbName(row.PATHBD);
+        map.set(nombre.toUpperCase(), row.PATHBD);
+    }
+    // fallback: si no está en EMPRESAS, asume servidor por defecto
+    for (const db of dbNames) {
+        if (!map.has(db.toUpperCase())) map.set(db.toUpperCase(), db);
+    }
+    return map;
+}
+
 /** Lógica central de cierre — reutilizada tanto por el cierre individual como por el masivo */
 async function ejecutarCierreContenedor(cidInt: number): Promise<{ mensaje: string; detalle: Record<string, any> }> {
         const pool = await poolPromise;
@@ -661,7 +682,9 @@ async function ejecutarCierreContenedor(cidInt: number): Promise<{ mensaje: stri
         const marcasResult = await pool.request()
             .input('cid', sql.Int, cidInt)
             .query('SELECT DISTINCT DB_NAME FROM CONTENEDOR_MARCAS WHERE CONTENEDORID = @cid');
-        const dbNames: string[] = marcasResult.recordset.map((r: any) => r.DB_NAME);
+        const plainDbNames: string[] = marcasResult.recordset.map((r: any) => r.DB_NAME);
+        const pathBDMap = await resolverPathBDsDesdeNombres(plainDbNames);
+        const dbNames: string[] = plainDbNames;
 
         const gastosLocales = (await pool.request()
             .input('cid', sql.Int, cidInt)
@@ -677,7 +700,8 @@ async function ejecutarCierreContenedor(cidInt: number): Promise<{ mensaje: stri
         let totalGlobalChina = 0;
         for (const dbName of dbNames) {
             try {
-                const bPool = await getBrandPool(dbName);
+                const pathBD = pathBDMap.get(dbName.toUpperCase()) || dbName;
+                const bPool = await getBrandPool(pathBD);
                 const r = await bPool.request()
                     .input('cont', sql.NVarChar, numeroContenedor)
                     .query(`
@@ -700,9 +724,10 @@ async function ejecutarCierreContenedor(cidInt: number): Promise<{ mensaje: stri
             detalleLog[dbName] = log;
 
             try {
-                const bPool = await getBrandPool(dbName);
+                const pathBD = pathBDMap.get(dbName.toUpperCase()) || dbName;
+                const bPool = await getBrandPool(pathBD);
 
-                await updateContenedorEnMarca(numeroContenedor, dbName);
+                await updateContenedorEnMarca(numeroContenedor, pathBD);
 
                 const albaranesTienda = (await bPool.request()
                     .input('cont', sql.NVarChar, numeroContenedor)
@@ -1228,13 +1253,15 @@ app.delete('/api/contenedores/:id/completo', authenticate, requireAdmin, async (
         const marcasRes = await pool.request().input('cid', sql.Int, cidInt)
             .query('SELECT DISTINCT DB_NAME FROM CONTENEDOR_MARCAS WHERE CONTENEDORID = @cid');
         const dbNames: string[] = marcasRes.recordset.map((r: any) => r.DB_NAME);
+        const pathBDMap = await resolverPathBDsDesdeNombres(dbNames);
 
         const errores: Record<string, string> = {};
 
         // Para cada marca: borrar ALBCOMPRAGASTOS de sus albaranes T
         for (const dbName of dbNames) {
             try {
-                const bPool = await getBrandPool(dbName);
+                const pathBD = pathBDMap.get(dbName.toUpperCase()) || dbName;
+                const bPool = await getBrandPool(pathBD);
 
                 const albaranesT = (await bPool.request()
                     .input('cont', sql.NVarChar, numeroContenedor)

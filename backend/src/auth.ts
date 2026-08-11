@@ -25,13 +25,13 @@ export function desEncriptar(encriptado: string): string {
 }
 // ──────────────────────────────────────────────────────────────────────────────
 
-const JWT_SECRET = process.env.JWT_SECRET || 'costo_venezuela_secret_2024_xK9mP2qR';
+const JWT_SECRET = process.env.JWT_SECRET || '';
 const JWT_EXPIRES = '8h';
 
 export interface TokenPayload {
     codusuario: number;
     usuario:    string;
-    empresas:   Array<{ codempresa: number; titulo: string; dbName: string }>;
+    empresas:   Array<{ codempresa: number; titulo: string; dbName: string; pathBD: string }>;
     isAdmin:    boolean;
     permisos:   string[];  // 'REPORTES' | 'GESTION'
 }
@@ -68,11 +68,17 @@ export function requireAdmin(req: Request, res: Response, next: NextFunction): v
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
+/**
+ * Devuelve los pathBD completos de las marcas del usuario (formato "servidor:NOMBRE_BD" o "NOMBRE_BD").
+ * Usar con getBrandPool(pathBD) y parsearDbName(pathBD).
+ */
 export function getDbNamesFromReq(req: Request): string[] {
     const user: TokenPayload = (req as any).user;
     const excluidas = (process.env.MARCAS_EXCLUIDAS || '')
         .split(',').map(s => s.trim().toUpperCase()).filter(Boolean);
-    return user.empresas.map(e => e.dbName).filter(db => !excluidas.includes(db.toUpperCase()));
+    return user.empresas
+        .filter(e => !excluidas.includes(e.dbName.toUpperCase()))
+        .map(e => e.pathBD || e.dbName); // pathBD cuando existe, dbName como fallback (tokens viejos)
 }
 
 export function hasPermiso(req: Request, permiso: string): boolean {

@@ -1,61 +1,74 @@
 import sql from 'mssql';
 import 'dotenv/config';
 
-// Pool principal: GESTIONCOMPRASDB (datos de la app: contenedores, gastos, etc.)
-const gestionConfig: sql.config = {
-    user: process.env.SA_USER || 'sa',
-    password: process.env.SA_PASSWORD || 'R3d3s1pc4..',
-    server: process.env.SERVER as string,
-    database: 'GESTIONCOMPRASDB',
-    options: { encrypt: true, trustServerCertificate: true },
-    pool: { max: 10, min: 0, idleTimeoutMillis: 30000 }
-};
+const baseConfig = () => ({
+    user:     process.env.SA_USER || 'sa',
+    password: process.env.SA_PASSWORD,
+    options:  { encrypt: true, trustServerCertificate: true },
+    pool:     { max: 5, min: 0, idleTimeoutMillis: 30000 }
+});
 
-export const poolPromise = new sql.ConnectionPool(gestionConfig)
-    .connect()
-    .then(pool => { console.log('✅ GESTIONCOMPRASDB Conectado'); return pool; })
+// Pool principal: GESTIONCOMPRASDB
+export const poolPromise = new sql.ConnectionPool({
+    ...baseConfig(),
+    server:   process.env.SERVER as string,
+    database: 'GESTIONCOMPRASDB',
+    pool:     { max: 10, min: 0, idleTimeoutMillis: 30000 }
+}).connect()
+    .then(p => { console.log('✅ GESTIONCOMPRASDB Conectado'); return p; })
     .catch(err => { console.error('❌ Error GESTIONCOMPRASDB:', err); throw err; });
 
-// Pool general: base de datos GENERAL (usuarios, empresas)
-const generalConfig: sql.config = {
-    user: process.env.SA_USER || 'sa',
-    password: process.env.SA_PASSWORD || 'R3d3s1pc4..',
-    server: process.env.SERVER as string,
-    database: 'GENERAL',
-    options: { encrypt: true, trustServerCertificate: true },
-    pool: { max: 5, min: 0, idleTimeoutMillis: 30000 }
-};
-
-export const generalPoolPromise = new sql.ConnectionPool(generalConfig)
-    .connect()
-    .then(pool => { console.log('✅ GENERAL Conectado'); return pool; })
+// Pool general: GENERAL (usuarios, empresas)
+export const generalPoolPromise = new sql.ConnectionPool({
+    ...baseConfig(),
+    server:   process.env.SERVER as string,
+    database: 'GENERAL'
+}).connect()
+    .then(p => { console.log('✅ GENERAL Conectado'); return p; })
     .catch(err => { console.error('❌ Error GENERAL:', err); throw err; });
 
-// Cache de pools por marca (DB name)
+// Cache de pools por (servidor::dbname)
 const brandPools = new Map<string, Promise<sql.ConnectionPool>>();
 
-export function getBrandPool(dbName: string): Promise<sql.ConnectionPool> {
-    const key = dbName.toUpperCase();
+/**
+ * Conecta a una base de datos de marca.
+ * pathBD puede ser "NOMBRE_BD" (usa SERVER del .env) o "servidor:NOMBRE_BD".
+ */
+export function getBrandPool(pathBD: string): Promise<sql.ConnectionPool> {
+    const { server, dbName } = _parsear(pathBD);
+    const key = `${server}::${dbName}`;
     if (!brandPools.has(key)) {
-        const config: sql.config = {
-            user: process.env.SA_USER || 'sa',
-            password: process.env.SA_PASSWORD || 'R3d3s1pc4..',
-            server: process.env.SERVER as string,
-            database: key,
-            options: { encrypt: true, trustServerCertificate: true },
-            pool: { max: 5, min: 0, idleTimeoutMillis: 30000 }
-        };
-        const p = new sql.ConnectionPool(config)
+        const p = new sql.ConnectionPool({ ...baseConfig(), server, database: dbName })
             .connect()
-            .then(pool => { console.log(`✅ BD Marca ${key} Conectada`); return pool; })
-            .catch(err => { console.error(`❌ Error BD Marca ${key}:`, err); throw err; });
+            .then(pool => { console.log(`✅ BD ${key} Conectada`); return pool; })
+            .catch(err  => { console.error(`❌ Error BD ${key}:`, err); throw err; });
         brandPools.set(key, p);
     }
     return brandPools.get(key)!;
 }
 
-// Extrae el nombre de la BD del campo PATHBD (formato "servidor:NOMBRE_BD")
+// ── Helpers de parseo ────────────────────────────────────────────────────────
+
+function _parsear(pathBD: string): { server: string; dbName: string } {
+    const i = pathBD.indexOf(':');
+    if (i > 0) {
+        return {
+            server: pathBD.slice(0, i).trim(),
+            dbName: pathBD.slice(i + 1).trim().toUpperCase()
+        };
+    }
+    return {
+        server: process.env.SERVER as string,
+        dbName: pathBD.trim().toUpperCase()
+    };
+}
+
+/** Devuelve sólo el nombre de la BD (sin servidor). Usar para prefijos SQL: `${parsearDbName(p)}.DBO`. */
+export function parsearDbName(pathBD: string): string {
+    return _parsear(pathBD).dbName;
+}
+
+/** Alias de parsearDbName para compatibilidad con código existente. */
 export function parsearPathBD(pathBD: string): string {
-    const partes = pathBD.split(':');
-    return partes[partes.length - 1].trim().toUpperCase();
+    return parsearDbName(pathBD);
 }
