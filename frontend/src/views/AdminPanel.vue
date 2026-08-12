@@ -375,16 +375,14 @@
 
     <!-- ──────────────── TAB: CONEXIÓN ──────────────── -->
     <div v-if="tabActiva === 'conexion'" class="tab-content">
-      <div class="section-card">
+
+      <!-- Conexión primaria -->
+      <div class="section-card" style="margin-bottom:20px">
         <div class="section-header">
-          <h3>Conexión al Servidor SQL</h3>
-          <span class="conn-badge" :class="configCargando ? 'loading' : 'ok'">
-            {{ configCargando ? 'Cargando...' : '● Configuración actual' }}
-          </span>
+          <h3>Conexión primaria (GESTIONCOMPRASDB)</h3>
+          <span class="conn-badge ok">● Servidor principal</span>
         </div>
-
-        <div v-if="configCargando" class="loading-msg">Cargando configuración...</div>
-
+        <div v-if="configCargando" class="loading-msg">Cargando...</div>
         <template v-else>
           <div class="conn-grid">
             <div class="form-group">
@@ -406,21 +404,62 @@
               <input v-model="configForm.marcasExcluidas" type="text" placeholder="TOPGROUP,MAYORES" class="conn-input" />
             </div>
           </div>
-
-          <div class="conn-warning">
-            ⚠ Guardar reiniciará el servidor automáticamente (~15 seg). La sesión se mantendrá.
-          </div>
-
-          <div class="conn-actions">
-            <button @click="guardarConfig" :disabled="configGuardando" class="btn-actualizar">
-              <span v-if="configGuardando" class="btn-spinner"></span>
-              {{ configGuardando ? configEstado : '💾 Guardar y reiniciar' }}
-            </button>
-          </div>
-
-          <div v-if="configMsg" class="sys-msg" :class="configMsg.tipo">{{ configMsg.texto }}</div>
         </template>
       </div>
+
+      <!-- Servidores adicionales -->
+      <div class="section-card" style="margin-bottom:20px">
+        <div class="section-header">
+          <h3>Servidores adicionales</h3>
+          <button @click="agregarServidor" class="btn-secondary">+ Agregar servidor</button>
+        </div>
+        <p class="info-note" style="margin-top:0;margin-bottom:16px">
+          Para marcas cuyas bases de datos están en otros SQL Server. El campo <strong>Servidor</strong>
+          debe coincidir con el prefijo usado en <code>GENERAL.EMPRESAS.PATHBD</code> (ej. <code>192.168.1.50:NOMBREBD</code>).
+        </p>
+
+        <div v-if="servers.length === 0" class="no-data" style="padding:16px">
+          Sin servidores adicionales configurados.
+        </div>
+
+        <table v-else class="admin-table">
+          <thead>
+            <tr>
+              <th>SERVIDOR (IP / HOSTNAME)</th>
+              <th>USUARIO SQL</th>
+              <th>CONTRASEÑA</th>
+              <th class="text-center">ACCIÓN</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="(s, i) in servers" :key="i">
+              <td><input v-model="s.host"     type="text"     placeholder="192.168.1.50" class="inline-input" /></td>
+              <td><input v-model="s.user"     type="text"     placeholder="sa"           class="inline-input" /></td>
+              <td><input v-model="s.password" type="password"
+                    :placeholder="s.hasPassword ? '••••••• (sin cambios)' : 'Contraseña'"
+                    class="inline-input" /></td>
+              <td class="text-center">
+                <button @click="servers.splice(i, 1)" class="btn-icon del">✕</button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- Advertencia + botón guardar -->
+      <div class="section-card">
+        <div class="conn-warning">
+          ⚠ Guardar reiniciará el servidor automáticamente (~15 seg). La sesión se mantendrá.
+        </div>
+        <div class="conn-actions">
+          <button @click="guardarTodo" :disabled="configGuardando" class="btn-actualizar">
+            <span v-if="configGuardando" class="btn-spinner"></span>
+            {{ configGuardando ? configEstado : '💾 Guardar y reiniciar' }}
+          </button>
+        </div>
+        <div v-if="configMsg" class="sys-msg" :class="configMsg.tipo" style="margin-top:16px">{{ configMsg.texto }}</div>
+      </div>
+
     </div>
 
   </div>
@@ -672,26 +711,49 @@ const configEstado = ref('');
 const configMsg = ref<{ tipo: 'ok' | 'err'; texto: string } | null>(null);
 const configForm = ref({ server: '', user: '', password: '', marcasExcluidas: '' });
 
+const servers = ref<Array<{ host: string; user: string; password: string; hasPassword: boolean }>>([]);
+
 const cargarConfig = async () => {
     configCargando.value = true;
     configMsg.value = null;
     try {
-        const { data } = await apiService.getConfig();
+        const [cfgRes, srvRes] = await Promise.all([apiService.getConfig(), apiService.getServers()]);
+        const data = cfgRes.data;
         configForm.value.server          = data.server          || '';
         configForm.value.user            = data.user            || '';
         configForm.value.password        = '';
         configForm.value.marcasExcluidas = data.marcasExcluidas || '';
         configHasPassword.value          = data.hasPassword     || false;
+        servers.value = (srvRes.data || []).map((s: any) => ({ ...s, password: '' }));
     } catch { configMsg.value = { tipo: 'err', texto: 'No se pudo cargar la configuración.' }; }
     finally  { configCargando.value = false; }
 };
 
-const guardarConfig = async () => {
+const agregarServidor = () => {
+    servers.value.push({ host: '', user: 'sa', password: '', hasPassword: false });
+};
+
+const _pollRestart = () => new Promise<void>((resolve, reject) => {
+    let attempts = 0;
+    setTimeout(() => {
+        const poll = setInterval(async () => {
+            if (++attempts > 40) { clearInterval(poll); reject(new Error('Timeout: el servidor tardó más de 2 min.')); return; }
+            try { await apiService.getHealth(); clearInterval(poll); resolve(); } catch {}
+        }, 3000);
+    }, 5000);
+});
+
+const guardarTodo = async () => {
     if (!confirm('¿Confirmas guardar los cambios? El servidor se reiniciará automáticamente.')) return;
     configGuardando.value = true;
     configMsg.value = null;
-    configEstado.value = 'Guardando...';
     try {
+        // 1. Guardar servidores adicionales (sin reiniciar)
+        configEstado.value = 'Guardando servidores adicionales...';
+        await apiService.updateServers(servers.value.map(s => ({ host: s.host, user: s.user, password: s.password })));
+
+        // 2. Guardar config primaria → reinicia el servidor (una sola vez)
+        configEstado.value = 'Guardando y reiniciando...';
         const payload: any = {
             server:          configForm.value.server,
             user:            configForm.value.user,
@@ -699,19 +761,14 @@ const guardarConfig = async () => {
         };
         if (configForm.value.password) payload.password = configForm.value.password;
         await apiService.updateConfig(payload);
-        configEstado.value = 'Reiniciando servidor...';
-        await new Promise<void>((resolve, reject) => {
-            let attempts = 0;
-            setTimeout(() => {
-                const poll = setInterval(async () => {
-                    if (++attempts > 40) { clearInterval(poll); reject(new Error('Timeout')); return; }
-                    try { await apiService.getHealth(); clearInterval(poll); resolve(); } catch {}
-                }, 3000);
-            }, 5000);
-        });
+
+        // 3. Esperar que vuelva
+        configEstado.value = 'Esperando reinicio...';
+        await _pollRestart();
+
         configForm.value.password = '';
-        configMsg.value = { tipo: 'ok', texto: '✅ Configuración guardada. Servidor reiniciado.' };
-        await cargarConfig();
+        servers.value.forEach(s => { s.password = ''; s.hasPassword = true; });
+        configMsg.value = { tipo: 'ok', texto: '✅ Configuración guardada. Servidor reiniciado correctamente.' };
     } catch (e: any) {
         configMsg.value = { tipo: 'err', texto: e?.response?.data?.error || e.message || 'Error desconocido.' };
     } finally { configGuardando.value = false; configEstado.value = ''; }

@@ -85,6 +85,9 @@ export const apiService = {
     getConfig:          () => api.get('/admin/config'),
     updateConfig:       (data: { server?: string; user?: string; password?: string; marcasExcluidas?: string }) =>
                             api.put('/admin/config', data),
+    getServers:         () => api.get('/admin/servers'),
+    updateServers:      (list: Array<{ host: string; user: string; password?: string }>) =>
+                            api.put('/admin/servers', list),
 
     // Tasas de cambio
     getTasas:           () => api.get('/tasas').then(r => r.data),

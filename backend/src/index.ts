@@ -1637,6 +1637,39 @@ app.put('/api/admin/config', authenticate, requireAdmin, (req: Request, res: Res
     setTimeout(() => process.exit(0), 400);
 });
 
+// Servidores adicionales (servers.json)
+const _serversPath = () => path.join(process.env.PROJECT_ROOT || path.join(__dirname, '..'), 'servers.json');
+
+app.get('/api/admin/servers', authenticate, requireAdmin, (_req: Request, res: Response) => {
+    let list: any[] = [];
+    if (fs.existsSync(_serversPath())) {
+        try { list = JSON.parse(fs.readFileSync(_serversPath(), 'utf8')); } catch {}
+    }
+    // Devuelve sin passwords
+    res.json(list.map(s => ({ host: s.host, user: s.user, hasPassword: !!s.password })));
+});
+
+app.put('/api/admin/servers', authenticate, requireAdmin, (req: Request, res: Response) => {
+    // Recibe array completo; passwords vacíos conservan el valor anterior
+    const incoming: Array<{ host: string; user: string; password?: string }> = req.body || [];
+
+    // Leer passwords actuales para conservarlos si vienen vacíos
+    let existing: any[] = [];
+    if (fs.existsSync(_serversPath())) {
+        try { existing = JSON.parse(fs.readFileSync(_serversPath(), 'utf8')); } catch {}
+    }
+    const existingMap = new Map(existing.map((s: any) => [s.host.trim().toLowerCase(), s.password]));
+
+    const list = incoming.map(s => ({
+        host:     s.host.trim(),
+        user:     s.user.trim(),
+        password: s.password?.trim() || existingMap.get(s.host.trim().toLowerCase()) || '',
+    }));
+
+    fs.writeFileSync(_serversPath(), JSON.stringify(list, null, 2), 'utf8');
+    res.json({ ok: true }); // no reinicia — lo hace updateConfig en el mismo flujo
+});
+
 // HEALTH CHECK (sin auth — para polling del updater)
 // ─────────────────────────────────────────────
 
