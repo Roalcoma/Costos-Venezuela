@@ -5,7 +5,7 @@ import 'dotenv/config';
 
 // ── Configuración de servidores adicionales (servers.json) ───────────────────
 
-interface ServerConfig { host: string; user: string; password: string; databases: string[]; }
+interface ServerConfig { host: string; port?: number; instance?: string; user: string; password: string; databases: string[]; }
 
 function _loadServers(): ServerConfig[] {
     const p = path.join(process.env.PROJECT_ROOT || path.join(__dirname, '..'), 'servers.json');
@@ -14,7 +14,9 @@ function _loadServers(): ServerConfig[] {
         const list = JSON.parse(fs.readFileSync(p, 'utf8')) as any[];
         return list.map(s => ({
             host:      s.host.trim(),
-            user:      s.user  || process.env.SA_USER || 'sa',
+            port:      s.port ? Number(s.port) : undefined,
+            instance:  s.instance?.trim() || undefined,
+            user:      s.user     || process.env.SA_USER || 'sa',
             password:  s.password || '',
             databases: String(s.databases || '').split(',').map((d: string) => d.trim().toUpperCase()).filter(Boolean),
         }));
@@ -37,7 +39,12 @@ function _configForServer(server: string) {
     return {
         user:     s?.user     || process.env.SA_USER || 'sa',
         password: s?.password || process.env.SA_PASSWORD,
-        options:  { encrypt: true, trustServerCertificate: true },
+        ...(s?.port     ? { port: s.port } : {}),
+        options:  {
+            encrypt: true,
+            trustServerCertificate: true,
+            ...(s?.instance ? { instanceName: s.instance } : {}),
+        },
         pool:     { max: 5, min: 0, idleTimeoutMillis: 30000 }
     };
 }

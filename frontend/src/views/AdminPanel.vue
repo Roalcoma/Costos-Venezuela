@@ -426,6 +426,8 @@
           <thead>
             <tr>
               <th>SERVIDOR (IP / HOSTNAME)</th>
+              <th>PUERTO</th>
+              <th>INSTANCIA</th>
               <th>USUARIO SQL</th>
               <th>CONTRASEÑA</th>
               <th>BASES DE DATOS (separadas por coma)</th>
@@ -434,8 +436,10 @@
           </thead>
           <tbody>
             <tr v-for="(s, i) in servers" :key="i">
-              <td><input v-model="s.host"      type="text"     placeholder="192.168.1.50"        class="inline-input" /></td>
-              <td><input v-model="s.user"      type="text"     placeholder="sa"                  class="inline-input" /></td>
+              <td><input v-model="s.host"      type="text"     placeholder="192.168.1.50"         class="inline-input" /></td>
+              <td><input v-model="s.port"      type="number"   placeholder="1433"                 class="inline-input" style="width:70px" /></td>
+              <td><input v-model="s.instance"  type="text"     placeholder="SQLEXPRESS"           class="inline-input" /></td>
+              <td><input v-model="s.user"      type="text"     placeholder="sa"                   class="inline-input" /></td>
               <td><input v-model="s.password"  type="password"
                     :placeholder="s.hasPassword ? '••••••• (sin cambios)' : 'Contraseña'"
                     class="inline-input" /></td>
@@ -713,7 +717,7 @@ const configEstado = ref('');
 const configMsg = ref<{ tipo: 'ok' | 'err'; texto: string } | null>(null);
 const configForm = ref({ server: '', user: '', password: '', marcasExcluidas: '' });
 
-const servers = ref<Array<{ host: string; user: string; password: string; hasPassword: boolean; databases: string }>>([]);
+const servers = ref<Array<{ host: string; port: string; instance: string; user: string; password: string; hasPassword: boolean; databases: string }>>([]);
 
 const cargarConfig = async () => {
     configCargando.value = true;
@@ -726,13 +730,13 @@ const cargarConfig = async () => {
         configForm.value.password        = '';
         configForm.value.marcasExcluidas = data.marcasExcluidas || '';
         configHasPassword.value          = data.hasPassword     || false;
-        servers.value = (srvRes.data || []).map((s: any) => ({ ...s, password: '', databases: s.databases || '' }));
+        servers.value = (srvRes.data || []).map((s: any) => ({ ...s, password: '', port: s.port || '', instance: s.instance || '', databases: s.databases || '' }));
     } catch { configMsg.value = { tipo: 'err', texto: 'No se pudo cargar la configuración.' }; }
     finally  { configCargando.value = false; }
 };
 
 const agregarServidor = () => {
-    servers.value.push({ host: '', user: 'sa', password: '', hasPassword: false, databases: '' });
+    servers.value.push({ host: '', port: '', instance: '', user: 'sa', password: '', hasPassword: false, databases: '' });
 };
 
 const _pollRestart = () => new Promise<void>((resolve, reject) => {
@@ -752,7 +756,7 @@ const guardarTodo = async () => {
     try {
         // 1. Guardar servidores adicionales (sin reiniciar)
         configEstado.value = 'Guardando servidores adicionales...';
-        await apiService.updateServers(servers.value.map(s => ({ host: s.host, user: s.user, password: s.password, databases: s.databases })));
+        await apiService.updateServers(servers.value.map(s => ({ host: s.host, port: s.port, instance: s.instance, user: s.user, password: s.password, databases: s.databases })));
 
         // 2. Guardar config primaria → reinicia el servidor (una sola vez)
         configEstado.value = 'Guardando y reiniciando...';

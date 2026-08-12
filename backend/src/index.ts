@@ -1639,7 +1639,7 @@ app.get('/api/admin/servers', authenticate, requireAdmin, (_req: Request, res: R
     if (fs.existsSync(_serversPath())) {
         try { list = JSON.parse(fs.readFileSync(_serversPath(), 'utf8')); } catch {}
     }
-    res.json(list.map(s => ({ host: s.host, user: s.user, hasPassword: !!s.password, databases: s.databases || '' })));
+    res.json(list.map(s => ({ host: s.host, port: s.port || '', instance: s.instance || '', user: s.user, hasPassword: !!s.password, databases: s.databases || '' })));
 });
 
 app.put('/api/admin/servers', authenticate, requireAdmin, (req: Request, res: Response) => {
@@ -1655,6 +1655,8 @@ app.put('/api/admin/servers', authenticate, requireAdmin, (req: Request, res: Re
 
     const list = incoming.map((s: any) => ({
         host:      s.host.trim(),
+        ...(s.port     ? { port: Number(s.port) } : {}),
+        ...(s.instance?.trim() ? { instance: s.instance.trim() } : {}),
         user:      s.user.trim(),
         password:  s.password?.trim() || existingMap.get(s.host.trim().toLowerCase()) || '',
         databases: s.databases || '',
