@@ -49,7 +49,8 @@ function _configForServer(server: string) {
         options:  {
             encrypt: true,
             trustServerCertificate: true,
-            ...(s?.instance ? { instanceName: s.instance } : {}),
+            // instanceName solo si no hay puerto explícito; con puerto mssql conecta directo
+            ...(!s?.port && s?.instance ? { instanceName: s.instance } : {}),
         },
         pool:     { max: 5, min: 0, idleTimeoutMillis: 30000 }
     };
