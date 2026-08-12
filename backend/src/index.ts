@@ -125,8 +125,10 @@ app.post('/api/auth/login', async (req: Request, res: Response) => {
                 .filter((e: any) => !excluidas.includes(e.dbName.toUpperCase()));
 
         // Empresas de servidores secundarios (GENERAL propio en cada servidor adicional)
+        console.log('[LOGIN] Servidores adicionales:', getServidoresAdicionalesRaw().map(s => s.host));
         for (const srv of getServidoresAdicionalesRaw()) {
             try {
+                console.log('[LOGIN] Consultando GENERAL en:', srv.host);
                 const secPool = await getBrandPool(`${srv.host}:GENERAL`);
                 const secResult = await secPool.request()
                     .input('usr', sql.NVarChar, usuario)
@@ -145,7 +147,7 @@ app.post('/api/auth/login', async (req: Request, res: Response) => {
                     if (empresas.some(x => x.dbName.toUpperCase() === dbName.toUpperCase())) continue;
                     empresas.push({ codempresa: e.CODEMPRESA, titulo: e.TITULO, dbName, pathBD: e.PATHBD });
                 }
-            } catch { /* servidor secundario no disponible, omitir */ }
+            } catch (secErr: any) { console.warn('[LOGIN] Error servidor secundario:', srv.host, secErr?.message); }
         }
 
         const pool = await poolPromise;
