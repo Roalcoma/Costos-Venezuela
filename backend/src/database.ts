@@ -24,6 +24,9 @@ function _loadServers(): ServerConfig[] {
 }
 
 const _servers = _loadServers();
+const _serversPath = path.join(process.env.PROJECT_ROOT || path.join(__dirname, '..'), 'servers.json');
+console.log(`[DB] servers.json en: ${_serversPath} | encontrado: ${fs.existsSync(_serversPath)} | servidores: ${_servers.length}`);
+if (_servers.length) console.log('[DB] Servidores adicionales:', _servers.map(s => `${s.host} (${s.databases.join(',')})`));
 
 /** Devuelve la lista cruda de servidores adicionales (para iterar en login). */
 export function getServidoresAdicionalesRaw() { return _servers; }
