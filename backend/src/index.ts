@@ -2,7 +2,7 @@ import express, { Request, Response } from 'express';
 import cors from 'cors';
 import sql from 'mssql';
 import * as dotenv from 'dotenv';
-import { poolPromise, generalPoolPromise, getBrandPool, parsearPathBD, parsearDbName, resolverServidor } from './database';
+import { poolPromise, generalPoolPromise, getBrandPool, parsearPathBD, parsearDbName, resolverServidor, getServidoresAdicionalesRaw } from './database';
 import { authenticate, requireAdmin, generarToken, getDbNamesFromReq, encriptar, TokenPayload } from './auth';
 import multer from 'multer';
 import * as XLSX from 'xlsx'
@@ -99,7 +99,7 @@ app.post('/api/auth/login', async (req: Request, res: Response) => {
 
         const user = userResult.recordset[0];
 
-        // Empresas accesibles para este usuario
+        // Empresas accesibles para este usuario (servidor primario)
         const empresasResult = await gPool.request()
             .input('cod', sql.Int, user.CODUSUARIO)
             .query(`
@@ -114,14 +114,39 @@ app.post('/api/auth/login', async (req: Request, res: Response) => {
         const excluidas = (process.env.MARCAS_EXCLUIDAS || '')
             .split(',').map(s => s.trim().toUpperCase()).filter(Boolean);
 
-        const empresas = empresasResult.recordset
-            .map(e => ({
-                codempresa: e.CODEMPRESA,
-                titulo: e.TITULO,
-                dbName: parsearDbName(e.PATHBD),  // solo nombre, para filtros y display
-                pathBD: e.PATHBD                   // path completo ("servidor:BD" o "BD")
-            }))
-            .filter(e => !excluidas.includes(e.dbName));
+        const empresas: Array<{ codempresa: number; titulo: string; dbName: string; pathBD: string }> =
+            empresasResult.recordset
+                .map((e: any) => ({
+                    codempresa: e.CODEMPRESA,
+                    titulo: e.TITULO,
+                    dbName: parsearDbName(e.PATHBD),
+                    pathBD: e.PATHBD
+                }))
+                .filter((e: any) => !excluidas.includes(e.dbName.toUpperCase()));
+
+        // Empresas de servidores secundarios (GENERAL propio en cada servidor adicional)
+        for (const srv of getServidoresAdicionalesRaw()) {
+            try {
+                const secPool = await getBrandPool(`${srv.host}:GENERAL`);
+                const secResult = await secPool.request()
+                    .input('usr', sql.NVarChar, usuario)
+                    .query(`
+                        SELECT E.CODEMPRESA, E.TITULO, E.PATHBD
+                        FROM EMPRESAS E
+                        INNER JOIN EMPRESASUSUARIO EU ON EU.CODEMPRESA = E.CODEMPRESA
+                        INNER JOIN USUARIOS U ON U.CODUSUARIO = EU.CODUSUARIO
+                        WHERE U.USUARIO = @usr
+                          AND ISNULL(E.PATHBD, '') <> ''
+                        ORDER BY EU.POSICION
+                    `);
+                for (const e of secResult.recordset) {
+                    const dbName = parsearDbName(e.PATHBD);
+                    if (excluidas.includes(dbName.toUpperCase())) continue;
+                    if (empresas.some(x => x.dbName.toUpperCase() === dbName.toUpperCase())) continue;
+                    empresas.push({ codempresa: e.CODEMPRESA, titulo: e.TITULO, dbName, pathBD: e.PATHBD });
+                }
+            } catch { /* servidor secundario no disponible, omitir */ }
+        }
 
         const pool = await poolPromise;
 

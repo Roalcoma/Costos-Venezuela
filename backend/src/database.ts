@@ -25,6 +25,9 @@ function _loadServers(): ServerConfig[] {
 
 const _servers = _loadServers();
 
+/** Devuelve la lista cruda de servidores adicionales (para iterar en login). */
+export function getServidoresAdicionalesRaw() { return _servers; }
+
 /** Devuelve el host del servidor adicional al que pertenece dbName, o null si es el primario. */
 export function resolverServidor(dbName: string): string | null {
     const upper = dbName.trim().toUpperCase();
