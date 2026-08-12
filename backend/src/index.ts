@@ -1750,14 +1750,6 @@ app.post('/api/admin/actualizar', authenticate, requireAdmin, (req: Request, res
             ];
             runPs1(copyLines.join('\n'));
 
-            const _shell = process.env.ComSpec || 'C:\\Windows\\System32\\cmd.exe';
-            console.log('[UPDATE] npm install backend...');
-            execSync('npm install', { cwd: path.join(projectRoot, 'backend'), stdio: 'pipe', timeout: 180000, shell: _shell });
-            console.log('[UPDATE] npm install frontend...');
-            execSync('npm install', { cwd: path.join(projectRoot, 'frontend'), stdio: 'pipe', timeout: 180000, shell: _shell });
-            console.log('[UPDATE] npm run build...');
-            execSync('npm run build', { cwd: path.join(projectRoot, 'frontend'), stdio: 'pipe', timeout: 120000, shell: _shell });
-
             try { fs.rmSync(tempDir, { recursive: true, force: true }); } catch {}
             console.log('[UPDATE] Completo. Reiniciando...');
             setTimeout(() => process.exit(0), 500);
