@@ -2,7 +2,7 @@ import express, { Request, Response } from 'express';
 import cors from 'cors';
 import sql from 'mssql';
 import * as dotenv from 'dotenv';
-import { poolPromise, generalPoolPromise, getBrandPool, parsearPathBD, parsearDbName } from './database';
+import { poolPromise, generalPoolPromise, getBrandPool, parsearPathBD, parsearDbName, resolverServidor } from './database';
 import { authenticate, requireAdmin, generarToken, getDbNamesFromReq, encriptar, TokenPayload } from './auth';
 import multer from 'multer';
 import * as XLSX from 'xlsx'
