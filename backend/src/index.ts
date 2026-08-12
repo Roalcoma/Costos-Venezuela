@@ -1793,8 +1793,8 @@ const distPath = path.join(process.env.PROJECT_ROOT || path.join(__dirname, '..'
 if (fs.existsSync(distPath)) {
     app.use(express.static(distPath));
     // Catch-all para Vue Router (history mode)
-    app.get('*', (_req: Request, res: Response) => res.sendFile(path.join(distPath, 'index.html')));
+    app.get(/.*/, (_req: Request, res: Response) => res.sendFile(path.join(distPath, 'index.html')));
     console.log('📦 Sirviendo frontend desde:', distPath);
 }
 
-app.listen(3001, () => console.log('🚀 Backend corriendo en puerto 3001'));
+app.listen(3003, () => console.log('🚀 Backend corriendo en puerto 3003'));
