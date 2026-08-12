@@ -653,18 +653,12 @@ app.get('/api/maestro-gastos/:marca', authenticate, async (req: Request, res: Re
 // PROCESAR GASTOS EN TIENDAS (multi-marca)
 // ─────────────────────────────────────────────
 
-/** Resuelve nombres de BD planos (sin servidor) a su pathBD completo usando GENERAL.EMPRESAS */
-async function resolverPathBDsDesdeNombres(dbNames: string[]): Promise<Map<string, string>> {
-    const gPool = await generalPoolPromise;
-    const res = await gPool.request().query(`SELECT PATHBD FROM EMPRESAS WHERE ISNULL(PATHBD,'') <> ''`);
+/** Resuelve nombres de BD planos a su pathBD completo usando servers.json */
+function resolverPathBDsDesdeNombres(dbNames: string[]): Map<string, string> {
     const map = new Map<string, string>();
-    for (const row of res.recordset) {
-        const nombre = parsearDbName(row.PATHBD);
-        map.set(nombre.toUpperCase(), row.PATHBD);
-    }
-    // fallback: si no está en EMPRESAS, asume servidor por defecto
     for (const db of dbNames) {
-        if (!map.has(db.toUpperCase())) map.set(db.toUpperCase(), db);
+        const host = resolverServidor(db);
+        map.set(db.toUpperCase(), host ? `${host}:${db}` : db);
     }
     return map;
 }
@@ -683,7 +677,7 @@ async function ejecutarCierreContenedor(cidInt: number): Promise<{ mensaje: stri
             .input('cid', sql.Int, cidInt)
             .query('SELECT DISTINCT DB_NAME FROM CONTENEDOR_MARCAS WHERE CONTENEDORID = @cid');
         const plainDbNames: string[] = marcasResult.recordset.map((r: any) => r.DB_NAME);
-        const pathBDMap = await resolverPathBDsDesdeNombres(plainDbNames);
+        const pathBDMap = resolverPathBDsDesdeNombres(plainDbNames);
         const dbNames: string[] = plainDbNames;
 
         const gastosLocales = (await pool.request()
@@ -1253,7 +1247,7 @@ app.delete('/api/contenedores/:id/completo', authenticate, requireAdmin, async (
         const marcasRes = await pool.request().input('cid', sql.Int, cidInt)
             .query('SELECT DISTINCT DB_NAME FROM CONTENEDOR_MARCAS WHERE CONTENEDORID = @cid');
         const dbNames: string[] = marcasRes.recordset.map((r: any) => r.DB_NAME);
-        const pathBDMap = await resolverPathBDsDesdeNombres(dbNames);
+        const pathBDMap = resolverPathBDsDesdeNombres(dbNames);
 
         const errores: Record<string, string> = {};
 
@@ -1645,8 +1639,7 @@ app.get('/api/admin/servers', authenticate, requireAdmin, (_req: Request, res: R
     if (fs.existsSync(_serversPath())) {
         try { list = JSON.parse(fs.readFileSync(_serversPath(), 'utf8')); } catch {}
     }
-    // Devuelve sin passwords
-    res.json(list.map(s => ({ host: s.host, user: s.user, hasPassword: !!s.password })));
+    res.json(list.map(s => ({ host: s.host, user: s.user, hasPassword: !!s.password, databases: s.databases || '' })));
 });
 
 app.put('/api/admin/servers', authenticate, requireAdmin, (req: Request, res: Response) => {
@@ -1660,10 +1653,11 @@ app.put('/api/admin/servers', authenticate, requireAdmin, (req: Request, res: Re
     }
     const existingMap = new Map(existing.map((s: any) => [s.host.trim().toLowerCase(), s.password]));
 
-    const list = incoming.map(s => ({
-        host:     s.host.trim(),
-        user:     s.user.trim(),
-        password: s.password?.trim() || existingMap.get(s.host.trim().toLowerCase()) || '',
+    const list = incoming.map((s: any) => ({
+        host:      s.host.trim(),
+        user:      s.user.trim(),
+        password:  s.password?.trim() || existingMap.get(s.host.trim().toLowerCase()) || '',
+        databases: s.databases || '',
     }));
 
     fs.writeFileSync(_serversPath(), JSON.stringify(list, null, 2), 'utf8');
