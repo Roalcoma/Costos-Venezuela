@@ -82,6 +82,9 @@ export const apiService = {
     // Sistema
     getHealth:          () => api.get('/health'),
     actualizarSistema:  (zip_url: string) => api.post('/admin/actualizar', { zip_url }),
+    getConfig:          () => api.get('/admin/config'),
+    updateConfig:       (data: { server?: string; user?: string; password?: string; marcasExcluidas?: string }) =>
+                            api.put('/admin/config', data),
 
     // Tasas de cambio
     getTasas:           () => api.get('/tasas').then(r => r.data),

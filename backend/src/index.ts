@@ -1591,6 +1591,52 @@ async function setupAdminTables() {
 setupAdminTables();
 
 // ─────────────────────────────────────────────
+// CONFIGURACIÓN DE CONEXIÓN (admin)
+// ─────────────────────────────────────────────
+
+function leerEnv(): Record<string, string> {
+    const envPath = path.join(process.env.PROJECT_ROOT || path.join(__dirname, '..'), '.env');
+    const map: Record<string, string> = {};
+    if (!fs.existsSync(envPath)) return map;
+    for (const line of fs.readFileSync(envPath, 'utf8').split('\n')) {
+        const eq = line.indexOf('=');
+        if (eq > 0) map[line.slice(0, eq).trim()] = line.slice(eq + 1).trim();
+    }
+    return map;
+}
+
+function escribirEnv(updates: Record<string, string>): void {
+    const envPath = path.join(process.env.PROJECT_ROOT || path.join(__dirname, '..'), '.env');
+    let content = fs.existsSync(envPath) ? fs.readFileSync(envPath, 'utf8') : '';
+    for (const [key, value] of Object.entries(updates)) {
+        const re = new RegExp(`^${key}=.*$`, 'm');
+        re.test(content) ? (content = content.replace(re, `${key}=${value}`)) : (content += `\n${key}=${value}`);
+    }
+    fs.writeFileSync(envPath, content, 'utf8');
+}
+
+app.get('/api/admin/config', authenticate, requireAdmin, (_req: Request, res: Response) => {
+    const env = leerEnv();
+    res.json({
+        server:          env.SERVER           || process.env.SERVER           || '',
+        user:            env.SA_USER          || process.env.SA_USER          || '',
+        hasPassword:     !!(env.SA_PASSWORD   || process.env.SA_PASSWORD),
+        marcasExcluidas: env.MARCAS_EXCLUIDAS || process.env.MARCAS_EXCLUIDAS || '',
+    });
+});
+
+app.put('/api/admin/config', authenticate, requireAdmin, (req: Request, res: Response) => {
+    const { server, user, password, marcasExcluidas } = req.body || {};
+    const updates: Record<string, string> = {};
+    if (server          !== undefined) updates.SERVER           = server;
+    if (user            !== undefined) updates.SA_USER          = user;
+    if (password        !== undefined && password !== '') { updates.SA_PASSWORD = password; updates.PASSWORD = password; }
+    if (marcasExcluidas !== undefined) updates.MARCAS_EXCLUIDAS = marcasExcluidas;
+    escribirEnv(updates);
+    res.json({ ok: true });
+    setTimeout(() => process.exit(0), 400);
+});
+
 // HEALTH CHECK (sin auth — para polling del updater)
 // ─────────────────────────────────────────────
 

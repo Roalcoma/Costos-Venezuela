@@ -13,7 +13,8 @@
       <button :class="['tab', { active: tabActiva === 'gastos' }]"    @click="tabActiva = 'gastos'">💰 Catálogo de Gastos</button>
       <button :class="['tab', { active: tabActiva === 'masiva' }]"    @click="tabActiva = 'masiva'">📥 Carga Masiva</button>
       <button :class="['tab', { active: tabActiva === 'tasas' }]"     @click="tabActiva = 'tasas'; cargarTasas()">💱 Tasas de Cambio</button>
-      <button :class="['tab', { active: tabActiva === 'sistema' }]"  @click="tabActiva = 'sistema'">⚙ Sistema</button>
+      <button :class="['tab', { active: tabActiva === 'sistema' }]"    @click="tabActiva = 'sistema'">⚙ Sistema</button>
+      <button :class="['tab', { active: tabActiva === 'conexion' }]"  @click="tabActiva = 'conexion'; cargarConfig()">🔌 Conexión</button>
     </div>
 
     <!-- ──────────────── TAB: USUARIOS ──────────────── -->
@@ -372,6 +373,56 @@
       </div>
     </div>
 
+    <!-- ──────────────── TAB: CONEXIÓN ──────────────── -->
+    <div v-if="tabActiva === 'conexion'" class="tab-content">
+      <div class="section-card">
+        <div class="section-header">
+          <h3>Conexión al Servidor SQL</h3>
+          <span class="conn-badge" :class="configCargando ? 'loading' : 'ok'">
+            {{ configCargando ? 'Cargando...' : '● Configuración actual' }}
+          </span>
+        </div>
+
+        <div v-if="configCargando" class="loading-msg">Cargando configuración...</div>
+
+        <template v-else>
+          <div class="conn-grid">
+            <div class="form-group">
+              <label>Servidor (IP o hostname)</label>
+              <input v-model="configForm.server" type="text" placeholder="127.0.0.1" class="conn-input" />
+            </div>
+            <div class="form-group">
+              <label>Usuario SQL</label>
+              <input v-model="configForm.user" type="text" placeholder="sa" class="conn-input" />
+            </div>
+            <div class="form-group">
+              <label>Contraseña SQL</label>
+              <input v-model="configForm.password" type="password"
+                :placeholder="configHasPassword ? '••••••• (sin cambios si se deja vacío)' : 'Nueva contraseña'"
+                class="conn-input" />
+            </div>
+            <div class="form-group">
+              <label>Marcas excluidas (separadas por coma)</label>
+              <input v-model="configForm.marcasExcluidas" type="text" placeholder="TOPGROUP,MAYORES" class="conn-input" />
+            </div>
+          </div>
+
+          <div class="conn-warning">
+            ⚠ Guardar reiniciará el servidor automáticamente (~15 seg). La sesión se mantendrá.
+          </div>
+
+          <div class="conn-actions">
+            <button @click="guardarConfig" :disabled="configGuardando" class="btn-actualizar">
+              <span v-if="configGuardando" class="btn-spinner"></span>
+              {{ configGuardando ? configEstado : '💾 Guardar y reiniciar' }}
+            </button>
+          </div>
+
+          <div v-if="configMsg" class="sys-msg" :class="configMsg.tipo">{{ configMsg.texto }}</div>
+        </template>
+      </div>
+    </div>
+
   </div>
 </template>
 
@@ -379,7 +430,7 @@
 import { ref, computed, onMounted, watch } from 'vue';
 import { apiService } from '../services/api';
 
-const tabActiva        = ref<'usuarios' | 'gastos' | 'masiva' | 'tasas' | 'sistema'>('usuarios');
+const tabActiva        = ref<'usuarios' | 'gastos' | 'masiva' | 'tasas' | 'sistema' | 'conexion'>('usuarios');
 const usuarios         = ref<any[]>([]);
 const gastos           = ref<any[]>([]);
 const cargandoUsuarios = ref(false);
@@ -611,6 +662,59 @@ const iniciarActualizacion = async () => {
     } catch (e: any) {
         errorActualizacion.value = e?.response?.data?.error || e.message || 'Error desconocido.';
     } finally { actualizando.value = false; estadoActualizacion.value = ''; }
+};
+
+// ── Configuración de conexión ──────────────────────
+const configCargando = ref(false);
+const configGuardando = ref(false);
+const configHasPassword = ref(false);
+const configEstado = ref('');
+const configMsg = ref<{ tipo: 'ok' | 'err'; texto: string } | null>(null);
+const configForm = ref({ server: '', user: '', password: '', marcasExcluidas: '' });
+
+const cargarConfig = async () => {
+    configCargando.value = true;
+    configMsg.value = null;
+    try {
+        const { data } = await apiService.getConfig();
+        configForm.value.server          = data.server          || '';
+        configForm.value.user            = data.user            || '';
+        configForm.value.password        = '';
+        configForm.value.marcasExcluidas = data.marcasExcluidas || '';
+        configHasPassword.value          = data.hasPassword     || false;
+    } catch { configMsg.value = { tipo: 'err', texto: 'No se pudo cargar la configuración.' }; }
+    finally  { configCargando.value = false; }
+};
+
+const guardarConfig = async () => {
+    if (!confirm('¿Confirmas guardar los cambios? El servidor se reiniciará automáticamente.')) return;
+    configGuardando.value = true;
+    configMsg.value = null;
+    configEstado.value = 'Guardando...';
+    try {
+        const payload: any = {
+            server:          configForm.value.server,
+            user:            configForm.value.user,
+            marcasExcluidas: configForm.value.marcasExcluidas,
+        };
+        if (configForm.value.password) payload.password = configForm.value.password;
+        await apiService.updateConfig(payload);
+        configEstado.value = 'Reiniciando servidor...';
+        await new Promise<void>((resolve, reject) => {
+            let attempts = 0;
+            setTimeout(() => {
+                const poll = setInterval(async () => {
+                    if (++attempts > 40) { clearInterval(poll); reject(new Error('Timeout')); return; }
+                    try { await apiService.getHealth(); clearInterval(poll); resolve(); } catch {}
+                }, 3000);
+            }, 5000);
+        });
+        configForm.value.password = '';
+        configMsg.value = { tipo: 'ok', texto: '✅ Configuración guardada. Servidor reiniciado.' };
+        await cargarConfig();
+    } catch (e: any) {
+        configMsg.value = { tipo: 'err', texto: e?.response?.data?.error || e.message || 'Error desconocido.' };
+    } finally { configGuardando.value = false; configEstado.value = ''; }
 };
 
 onMounted(() => { cargarUsuarios(); cargarGastos(); cargarVersion(); });
@@ -956,4 +1060,14 @@ h1 { margin: 0; font-size: 22px; font-weight: 800; color: var(--dark); }
 .sys-msg.err    { background: #fee2e2; color: #991b1b; }
 .sys-help       { margin-top: 24px; padding: 14px 16px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; font-size: 13px; color: #475569; line-height: 1.6; }
 .sys-help code  { background: #e2e8f0; padding: 1px 6px; border-radius: 4px; font-family: monospace; }
+
+/* ── Conexión tab ─────────────────────────────── */
+.conn-badge       { padding: 3px 12px; border-radius: 12px; font-size: 12px; font-weight: 700; }
+.conn-badge.ok    { background: #d1fae5; color: #065f46; }
+.conn-badge.loading { background: #fef3c7; color: #92400e; }
+.conn-grid        { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 20px; }
+.conn-input       { padding: 9px 12px; border: 1.5px solid var(--border, #ddd); border-radius: 8px; font-size: 13px; font-family: inherit; outline: none; width: 100%; box-sizing: border-box; }
+.conn-input:focus { border-color: var(--primary); }
+.conn-warning     { background: #fef9c3; border: 1px solid #fde047; border-radius: 8px; padding: 10px 14px; font-size: 13px; color: #713f12; margin-bottom: 20px; }
+.conn-actions     { display: flex; gap: 12px; align-items: center; }
 </style>
