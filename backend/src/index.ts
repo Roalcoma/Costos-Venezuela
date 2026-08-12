@@ -1768,4 +1768,13 @@ app.post('/api/admin/actualizar', authenticate, requireAdmin, (req: Request, res
     });
 });
 
+// Servir frontend compilado (producción)
+const distPath = path.join(process.env.PROJECT_ROOT || path.join(__dirname, '..', '..'), 'frontend', 'dist');
+if (fs.existsSync(distPath)) {
+    app.use(express.static(distPath));
+    // Catch-all para Vue Router (history mode)
+    app.get('*', (_req: Request, res: Response) => res.sendFile(path.join(distPath, 'index.html')));
+    console.log('📦 Sirviendo frontend desde:', distPath);
+}
+
 app.listen(3001, () => console.log('🚀 Backend corriendo en puerto 3001'));
