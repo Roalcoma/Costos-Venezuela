@@ -124,30 +124,32 @@ app.post('/api/auth/login', async (req: Request, res: Response) => {
                 }))
                 .filter((e: any) => !excluidas.includes(e.dbName.toUpperCase()));
 
-        // Empresas de servidores secundarios (GENERAL propio en cada servidor adicional)
-        console.log('[LOGIN] Servidores adicionales:', getServidoresAdicionalesRaw().map(s => s.host));
+        // Empresas de servidores secundarios: usa la lista explícita de databases en servers.json
+        // No filtra por usuario — el admin ya decidió qué BDs exponer en cada servidor adicional
         for (const srv of getServidoresAdicionalesRaw()) {
+            // Intentar obtener títulos desde el GENERAL del servidor secundario
+            const tituloMap = new Map<string, string>();
             try {
-                console.log('[LOGIN] Consultando GENERAL en:', srv.host);
                 const secPool = await getBrandPool(`${srv.host}:GENERAL`);
-                const secResult = await secPool.request()
-                    .input('usr', sql.NVarChar, usuario)
-                    .query(`
-                        SELECT E.CODEMPRESA, E.TITULO, E.PATHBD
-                        FROM EMPRESAS E
-                        INNER JOIN EMPRESASUSUARIO EU ON EU.CODEMPRESA = E.CODEMPRESA
-                        INNER JOIN USUARIOS U ON U.CODUSUARIO = EU.CODUSUARIO
-                        WHERE U.USUARIO = @usr
-                          AND ISNULL(E.PATHBD, '') <> ''
-                        ORDER BY EU.POSICION
-                    `);
-                for (const e of secResult.recordset) {
-                    const dbName = parsearDbName(e.PATHBD);
-                    if (excluidas.includes(dbName.toUpperCase())) continue;
-                    if (empresas.some(x => x.dbName.toUpperCase() === dbName.toUpperCase())) continue;
-                    empresas.push({ codempresa: e.CODEMPRESA, titulo: e.TITULO, dbName, pathBD: e.PATHBD });
+                const titulos = await secPool.request().query(
+                    `SELECT TITULO, PATHBD FROM EMPRESAS WHERE ISNULL(PATHBD, '') <> ''`
+                );
+                for (const e of titulos.recordset) {
+                    const k = parsearDbName(e.PATHBD).toUpperCase();
+                    tituloMap.set(k, e.TITULO);
                 }
-            } catch (secErr: any) { console.warn('[LOGIN] Error servidor secundario:', srv.host, secErr?.message); }
+            } catch { /* GENERAL no disponible, usará nombre de BD como título */ }
+
+            for (const db of srv.databases) {
+                if (excluidas.includes(db)) continue;
+                if (empresas.some(x => x.dbName.toUpperCase() === db)) continue;
+                empresas.push({
+                    codempresa: 0,
+                    titulo: tituloMap.get(db) || db,
+                    dbName: db,
+                    pathBD: db,
+                });
+            }
         }
 
         const pool = await poolPromise;
